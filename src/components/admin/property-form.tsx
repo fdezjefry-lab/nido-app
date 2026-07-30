@@ -49,9 +49,14 @@ export function PropertyForm({
   isSubmitting?: boolean;
   onSubmit: (values: PropertyFormValues) => void;
 }) {
-  const [values, setValues] = useState<PropertyFormValues>({
-    ...EMPTY_VALUES,
-    ...defaultValues,
+  const [values, setValues] = useState<PropertyFormValues>(() => {
+    const initial = { ...EMPTY_VALUES };
+    for (const key of Object.keys(EMPTY_VALUES) as (keyof PropertyFormValues)[]) {
+      if (defaultValues?.[key] !== undefined) {
+        (initial as Record<string, unknown>)[key] = defaultValues[key];
+      }
+    }
+    return initial;
   });
   const [ruleDraft, setRuleDraft] = useState("");
 
