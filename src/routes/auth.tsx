@@ -8,12 +8,16 @@ import { lovable } from "@/integrations/lovable";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/auth")({
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+  }),
   head: () => ({ meta: [{ title: "Entrar o crear cuenta — Nido" }, { name: "description", content: "Accede a Nido para solicitar y gestionar tus estancias." }] }),
   component: AuthPage,
 });
 
 function AuthPage() {
   const navigate = useNavigate();
+  const { redirect } = Route.useSearch();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -32,13 +36,15 @@ function AuthPage() {
       setMessage(error ? error.message : "Revisa tu correo para confirmar la cuenta.");
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage(error.message); else await navigate({ to: "/cuenta" });
+      if (error) setMessage(error.message);
+      else if (redirect) window.location.href = redirect;
+      else await navigate({ to: "/cuenta" });
     }
     setLoading(false);
   }
 
   async function google() {
-    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: `${window.location.origin}/cuenta` });
+    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: `${window.location.origin}${redirect ?? "/cuenta"}` });
     if (result.error) setMessage(result.error.message);
   }
 

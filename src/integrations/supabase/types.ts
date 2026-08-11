@@ -343,7 +343,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_property_occupied_ranges: {
+        Args: { p_property_id: string }
+        Returns: { range_start: string; range_end: string }[]
+      }
     }
     Enums: {
       app_role: "admin" | "customer"
