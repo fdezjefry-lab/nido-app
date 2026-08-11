@@ -60,7 +60,7 @@ function PropertyDetail() {
         : "(sin fechas seleccionadas aún)";
     const nota = message.trim() ? ` Nota: ${message.trim()}.` : "";
     const mensaje = `¡Hola! Quiero reservar *${property.name}* ${fechas}, para ${guests} huésped${guests > 1 ? "es" : ""}.${nota} ¿Está disponible?`;
-    const url = `https://wa.me/18092921223?text=${encodeURIComponent(mensaje)}`;
+    const url = `https://wa.me/18294071223?text=${encodeURIComponent(mensaje)}`;
     window.open(url, "_blank");
   }
 
@@ -73,7 +73,10 @@ function PropertyDetail() {
             <ChevronLeft /> Todos los alojamientos
           </Link>
         </Button>
-        <PropertyImageSwiper images={getPropertyImageUrls(property.property_images)} alt={property.name}>
+        <PropertyImageSwiper
+          images={getPropertyImageUrls(property.property_images)}
+          alt={property.name}
+        >
           <div className="absolute bottom-0 p-7 text-primary-foreground md:p-10">
             <p className="flex items-center gap-1 text-sm">
               <MapPin className="size-4" />

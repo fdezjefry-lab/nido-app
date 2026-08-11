@@ -10,6 +10,7 @@ import {
   LogOut,
   Plus,
   Settings,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -115,7 +116,9 @@ function AdminPage() {
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
-      const { error } = await supabase.from("properties").insert({ ...values, slug, status: "draft" });
+      const { error } = await supabase
+        .from("properties")
+        .insert({ ...values, slug, status: "draft" });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -132,6 +135,17 @@ function AdminPage() {
     },
     onSuccess: () => {
       setNotice("Alojamiento actualizado.");
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+    },
+    onError: (error: Error) => setNotice(error.message),
+  });
+  const deleteProperty = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("properties").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setNotice("Alojamiento eliminado.");
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
     },
     onError: (error: Error) => setNotice(error.message),
@@ -338,6 +352,20 @@ function AdminPage() {
                     <Button size="sm" variant="ghost" onClick={() => setEditingProperty(property)}>
                       Editar
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        if (
+                          confirm(`¿Eliminar "${property.name}"? Esta acción no se puede deshacer.`)
+                        ) {
+                          deleteProperty.mutate(property.id);
+                        }
+                      }}
+                    >
+                      <Trash2 />
+                    </Button>
                   </div>
                 </div>
               </article>
@@ -345,7 +373,10 @@ function AdminPage() {
           </div>
         </section>
       </main>
-      <Dialog open={Boolean(editingProperty)} onOpenChange={(open) => !open && setEditingProperty(null)}>
+      <Dialog
+        open={Boolean(editingProperty)}
+        onOpenChange={(open) => !open && setEditingProperty(null)}
+      >
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl">
@@ -372,7 +403,10 @@ function AdminPage() {
                 />
               </TabsContent>
               <TabsContent value="photos">
-                <PropertyImageManager propertyId={editingProperty.id} propertyName={editingProperty.name} />
+                <PropertyImageManager
+                  propertyId={editingProperty.id}
+                  propertyName={editingProperty.name}
+                />
               </TabsContent>
             </Tabs>
           )}
