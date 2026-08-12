@@ -40,8 +40,7 @@ export function PropertyImageManager({
   const images = imagesQuery.data ?? [];
 
   const uploadImages = useMutation({
-    mutationFn: async (files: FileList) => {
-      const list = Array.from(files);
+    mutationFn: async (list: File[]) => {
       if (images.length + list.length > MAX_IMAGES) {
         throw new Error(`Máximo ${MAX_IMAGES} imágenes por alojamiento.`);
       }
@@ -143,8 +142,9 @@ export function PropertyImageManager({
           multiple
           className="hidden"
           onChange={(event) => {
-            if (event.target.files?.length) uploadImages.mutate(event.target.files);
+            const files = Array.from(event.target.files ?? []);
             event.target.value = "";
+            if (files.length) uploadImages.mutate(files);
           }}
         />
       </div>

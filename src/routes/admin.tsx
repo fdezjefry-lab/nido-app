@@ -34,6 +34,7 @@ import { claimAdmin } from "@/lib/admin.functions";
 import { getPropertyImageUrls } from "@/lib/property-image-url";
 
 type PropertyWithImages = Tables<"properties"> & { property_images: Tables<"property_images">[] };
+type AdminSection = "resumen" | "alojamientos" | "solicitudes" | "clientes";
 
 export const Route = createFileRoute("/admin")({
   ssr: false,
@@ -52,6 +53,7 @@ function AdminPage() {
   const [dialog, setDialog] = useState(false);
   const [editingProperty, setEditingProperty] = useState<PropertyWithImages | null>(null);
   const [notice, setNotice] = useState("");
+  const [section, setSection] = useState<AdminSection>("resumen");
   const roleQuery = useQuery({
     queryKey: ["admin-role", user.id],
     queryFn: async () => {
@@ -84,6 +86,16 @@ function AdminPage() {
         .from("booking_requests")
         .select("*, properties(name)")
         .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+  const clientIds = Array.from(new Set((bookingsQuery.data ?? []).map((b) => b.user_id)));
+  const clientsQuery = useQuery({
+    queryKey: ["admin-clients", clientIds],
+    enabled: roleQuery.data === true && clientIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("profiles").select("*").in("id", clientIds);
       if (error) throw error;
       return data;
     },
@@ -180,16 +192,32 @@ function AdminPage() {
           Nido.
         </a>
         <nav className="mt-10 space-y-2">
-          <Button variant="secondary" className="w-full justify-start">
+          <Button
+            variant={section === "resumen" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => setSection("resumen")}
+          >
             <LayoutDashboard /> Resumen
           </Button>
-          <Button variant="ghost" className="w-full justify-start">
+          <Button
+            variant={section === "alojamientos" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => setSection("alojamientos")}
+          >
             <Building2 /> Alojamientos
           </Button>
-          <Button variant="ghost" className="w-full justify-start">
+          <Button
+            variant={section === "solicitudes" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => setSection("solicitudes")}
+          >
             <CalendarCheck /> Solicitudes
           </Button>
-          <Button variant="ghost" className="w-full justify-start">
+          <Button
+            variant={section === "clientes" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => setSection("clientes")}
+          >
             <Users /> Clientes
           </Button>
         </nav>
@@ -250,128 +278,168 @@ function AdminPage() {
             icon={<Euro />}
           />
         </section>
-        <section className="mt-10">
-          <div className="mb-5 flex items-end justify-between">
-            <h2 className="font-display text-3xl">Solicitudes recientes</h2>
-            <Badge variant="secondary">{pending.length} pendientes</Badge>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-border bg-card">
-            {bookings.length ? (
-              bookings.slice(0, 6).map((booking) => (
-                <div
-                  key={booking.id}
-                  className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-5 last:border-0"
+        {(section === "resumen" || section === "solicitudes") && (
+          <section className="mt-10">
+            <div className="mb-5 flex items-end justify-between">
+              <h2 className="font-display text-3xl">
+                {section === "solicitudes" ? "Solicitudes" : "Solicitudes recientes"}
+              </h2>
+              <Badge variant="secondary">{pending.length} pendientes</Badge>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+              {bookings.length ? (
+                (section === "solicitudes" ? bookings : bookings.slice(0, 6)).map((booking) => (
+                  <div
+                    key={booking.id}
+                    className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-5 last:border-0"
+                  >
+                    <div>
+                      <p className="font-semibold">{booking.properties?.name}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Cliente · {booking.check_in} → {booking.check_out}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{booking.status}</Badge>
+                      {booking.status === "pending" && (
+                        <>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            aria-label="Rechazar"
+                            onClick={() =>
+                              updateBooking.mutate({ id: booking.id, status: "rejected" })
+                            }
+                          >
+                            <X />
+                          </Button>
+                          <Button
+                            size="icon"
+                            aria-label="Aprobar"
+                            onClick={() =>
+                              updateBooking.mutate({ id: booking.id, status: "approved" })
+                            }
+                          >
+                            <Check />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="p-8 text-center text-muted-foreground">Todavía no hay solicitudes.</p>
+              )}
+            </div>
+          </section>
+        )}
+        {(section === "resumen" || section === "alojamientos") && (
+          <section className="mt-10">
+            <h2 className="mb-5 font-display text-3xl">Alojamientos</h2>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {properties.map((property) => (
+                <article
+                  key={property.id}
+                  className="overflow-hidden rounded-2xl border border-border bg-card"
                 >
-                  <div>
-                    <p className="font-semibold">{booking.properties?.name}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Cliente · {booking.check_in} → {booking.check_out}
+                  <img
+                    src={getPropertyImageUrls(property.property_images)[0]}
+                    alt={property.name}
+                    width={1344}
+                    height={896}
+                    loading="lazy"
+                    className="aspect-[2/1] w-full object-cover"
+                  />
+                  <div className="p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">{property.name}</h3>
+                      <Badge variant={property.status === "published" ? "default" : "secondary"}>
+                        {property.status}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {property.city} ·{" "}
+                      {Number(property.price_per_night).toLocaleString("es-DO", {
+                        style: "currency",
+                        currency: "DOP",
+                        maximumFractionDigits: 0,
+                      })}
+                      /noche
                     </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">{booking.status}</Badge>
-                    {booking.status === "pending" && (
-                      <>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          aria-label="Rechazar"
-                          onClick={() =>
-                            updateBooking.mutate({ id: booking.id, status: "rejected" })
+                    <div className="mt-4 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          await supabase
+                            .from("properties")
+                            .update({
+                              status: property.status === "published" ? "draft" : "published",
+                            })
+                            .eq("id", property.id);
+                          await propertiesQuery.refetch();
+                        }}
+                      >
+                        {property.status === "published" ? "Ocultar" : "Publicar"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setEditingProperty(property)}
+                      >
+                        Editar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `¿Eliminar "${property.name}"? Esta acción no se puede deshacer.`,
+                            )
+                          ) {
+                            deleteProperty.mutate(property.id);
                           }
-                        >
-                          <X />
-                        </Button>
-                        <Button
-                          size="icon"
-                          aria-label="Aprobar"
-                          onClick={() =>
-                            updateBooking.mutate({ id: booking.id, status: "approved" })
-                          }
-                        >
-                          <Check />
-                        </Button>
-                      </>
-                    )}
+                        }}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))
-            ) : (
-              <p className="p-8 text-center text-muted-foreground">Todavía no hay solicitudes.</p>
-            )}
-          </div>
-        </section>
-        <section className="mt-10">
-          <h2 className="mb-5 font-display text-3xl">Alojamientos</h2>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {properties.map((property) => (
-              <article
-                key={property.id}
-                className="overflow-hidden rounded-2xl border border-border bg-card"
-              >
-                <img
-                  src={getPropertyImageUrls(property.property_images)[0]}
-                  alt={property.name}
-                  width={1344}
-                  height={896}
-                  loading="lazy"
-                  className="aspect-[2/1] w-full object-cover"
-                />
-                <div className="p-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">{property.name}</h3>
-                    <Badge variant={property.status === "published" ? "default" : "secondary"}>
-                      {property.status}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {property.city} ·{" "}
-                    {Number(property.price_per_night).toLocaleString("es-DO", {
-                      style: "currency",
-                      currency: "DOP",
-                      maximumFractionDigits: 0,
-                    })}
-                    /noche
-                  </p>
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        await supabase
-                          .from("properties")
-                          .update({
-                            status: property.status === "published" ? "draft" : "published",
-                          })
-                          .eq("id", property.id);
-                        await propertiesQuery.refetch();
-                      }}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+        {section === "clientes" && (
+          <section className="mt-10">
+            <h2 className="mb-5 font-display text-3xl">Clientes</h2>
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+              {clientsQuery.data?.length ? (
+                clientsQuery.data.map((client) => {
+                  const clientBookings = bookings.filter((b) => b.user_id === client.id);
+                  return (
+                    <div
+                      key={client.id}
+                      className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-5 last:border-0"
                     >
-                      {property.status === "published" ? "Ocultar" : "Publicar"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditingProperty(property)}>
-                      Editar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => {
-                        if (
-                          confirm(`¿Eliminar "${property.name}"? Esta acción no se puede deshacer.`)
-                        ) {
-                          deleteProperty.mutate(property.id);
-                        }
-                      }}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+                      <div>
+                        <p className="font-semibold">{client.full_name}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {client.phone ?? "Sin teléfono"}
+                        </p>
+                      </div>
+                      <Badge variant="secondary">{clientBookings.length} solicitudes</Badge>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="p-8 text-center text-muted-foreground">Todavía no hay clientes.</p>
+              )}
+            </div>
+          </section>
+        )}
       </main>
       <Dialog
         open={Boolean(editingProperty)}
