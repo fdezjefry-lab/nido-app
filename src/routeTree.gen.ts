@@ -14,6 +14,7 @@ import { Route as CuentaRouteImport } from './routes/cuenta'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ReciboBookingIdRouteImport } from './routes/recibo.$bookingId'
 import { Route as AlojamientosSlugRouteImport } from './routes/alojamientos.$slug'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -41,6 +42,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReciboBookingIdRoute = ReciboBookingIdRouteImport.update({
+  id: '/recibo/$bookingId',
+  path: '/recibo/$bookingId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlojamientosSlugRoute = AlojamientosSlugRouteImport.update({
   id: '/alojamientos/$slug',
   path: '/alojamientos/$slug',
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/cuenta': typeof CuentaRoute
   '/reset-password': typeof ResetPasswordRoute
   '/alojamientos/$slug': typeof AlojamientosSlugRoute
+  '/recibo/$bookingId': typeof ReciboBookingIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/cuenta': typeof CuentaRoute
   '/reset-password': typeof ResetPasswordRoute
   '/alojamientos/$slug': typeof AlojamientosSlugRoute
+  '/recibo/$bookingId': typeof ReciboBookingIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/cuenta': typeof CuentaRoute
   '/reset-password': typeof ResetPasswordRoute
   '/alojamientos/$slug': typeof AlojamientosSlugRoute
+  '/recibo/$bookingId': typeof ReciboBookingIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/cuenta'
     | '/reset-password'
     | '/alojamientos/$slug'
+    | '/recibo/$bookingId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/cuenta'
     | '/reset-password'
     | '/alojamientos/$slug'
+    | '/recibo/$bookingId'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/cuenta'
     | '/reset-password'
     | '/alojamientos/$slug'
+    | '/recibo/$bookingId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +118,7 @@ export interface RootRouteChildren {
   CuentaRoute: typeof CuentaRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   AlojamientosSlugRoute: typeof AlojamientosSlugRoute
+  ReciboBookingIdRoute: typeof ReciboBookingIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -145,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/recibo/$bookingId': {
+      id: '/recibo/$bookingId'
+      path: '/recibo/$bookingId'
+      fullPath: '/recibo/$bookingId'
+      preLoaderRoute: typeof ReciboBookingIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alojamientos/$slug': {
       id: '/alojamientos/$slug'
       path: '/alojamientos/$slug'
@@ -162,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   CuentaRoute: CuentaRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   AlojamientosSlugRoute: AlojamientosSlugRoute,
+  ReciboBookingIdRoute: ReciboBookingIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
