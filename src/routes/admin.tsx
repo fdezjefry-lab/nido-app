@@ -32,6 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { claimAdmin } from "@/lib/admin.functions";
 import { getPropertyImageUrls } from "@/lib/property-image-url";
+import logo from "@/assets/logo.png";
 
 type PropertyWithImages = Tables<"properties"> & { property_images: Tables<"property_images">[] };
 type AdminSection = "resumen" | "alojamientos" | "solicitudes" | "clientes";
@@ -188,8 +189,8 @@ function AdminPage() {
   return (
     <div className="min-h-screen bg-muted/50 lg:grid lg:grid-cols-[240px_1fr]">
       <aside className="hidden min-h-screen border-r border-border bg-card p-6 lg:flex lg:flex-col">
-        <a href="/" className="font-display text-3xl">
-          Nido.
+        <a href="/" className="flex items-center">
+          <img src={logo} alt="Nido" className="h-9 w-auto" />
         </a>
         <nav className="mt-10 space-y-2">
           <Button
