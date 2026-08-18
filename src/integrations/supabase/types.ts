@@ -73,6 +73,8 @@ export type Database = {
       booking_requests: {
         Row: {
           admin_note: string | null
+          amount_paid: number
+          amount_refunded: number
           check_in: string
           check_out: string
           created_at: string
@@ -80,6 +82,7 @@ export type Database = {
           id: string
           message: string | null
           nightly_rate: number
+          payment_status: Database["public"]["Enums"]["payment_status"]
           property_id: string
           status: Database["public"]["Enums"]["booking_status"]
           total_amount: number
@@ -88,6 +91,8 @@ export type Database = {
         }
         Insert: {
           admin_note?: string | null
+          amount_paid?: number
+          amount_refunded?: number
           check_in: string
           check_out: string
           created_at?: string
@@ -95,6 +100,7 @@ export type Database = {
           id?: string
           message?: string | null
           nightly_rate: number
+          payment_status?: Database["public"]["Enums"]["payment_status"]
           property_id: string
           status?: Database["public"]["Enums"]["booking_status"]
           total_amount: number
@@ -103,6 +109,8 @@ export type Database = {
         }
         Update: {
           admin_note?: string | null
+          amount_paid?: number
+          amount_refunded?: number
           check_in?: string
           check_out?: string
           created_at?: string
@@ -110,6 +118,7 @@ export type Database = {
           id?: string
           message?: string | null
           nightly_rate?: number
+          payment_status?: Database["public"]["Enums"]["payment_status"]
           property_id?: string
           status?: Database["public"]["Enums"]["booking_status"]
           total_amount?: number
@@ -122,6 +131,88 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_status_history: {
+        Row: {
+          booking_id: string
+          changed_by: string | null
+          created_at: string
+          id: string
+          new_status: Database["public"]["Enums"]["booking_status"]
+          old_status: Database["public"]["Enums"]["booking_status"] | null
+          reason: string | null
+        }
+        Insert: {
+          booking_id: string
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          new_status: Database["public"]["Enums"]["booking_status"]
+          old_status?: Database["public"]["Enums"]["booking_status"] | null
+          reason?: string | null
+        }
+        Update: {
+          booking_id?: string
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          new_status?: Database["public"]["Enums"]["booking_status"]
+          old_status?: Database["public"]["Enums"]["booking_status"] | null
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_status_history_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "booking_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_transactions: {
+        Row: {
+          amount: number
+          booking_id: string
+          created_at: string
+          id: string
+          method: string
+          note: string | null
+          recorded_by: string | null
+          reference: string | null
+          type: string
+        }
+        Insert: {
+          amount: number
+          booking_id: string
+          created_at?: string
+          id?: string
+          method: string
+          note?: string | null
+          recorded_by?: string | null
+          reference?: string | null
+          type: string
+        }
+        Update: {
+          amount?: number
+          booking_id?: string
+          created_at?: string
+          id?: string
+          method?: string
+          note?: string | null
+          recorded_by?: string | null
+          reference?: string | null
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_transactions_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "booking_requests"
             referencedColumns: ["id"]
           },
         ]
@@ -356,6 +447,12 @@ export type Database = {
         | "rejected"
         | "cancelled"
         | "completed"
+      payment_status:
+        | "unpaid"
+        | "partially_paid"
+        | "paid"
+        | "partially_refunded"
+        | "refunded"
       property_status: "draft" | "published" | "archived"
     }
     CompositeTypes: {

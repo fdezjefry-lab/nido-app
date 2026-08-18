@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { BookingDetailDialog } from "@/components/admin/booking-detail-dialog";
 import { PropertyForm, type PropertyFormValues } from "@/components/admin/property-form";
 import { PropertyImageManager } from "@/components/admin/property-image-manager";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { claimAdmin } from "@/lib/admin.functions";
+import { paymentStatusBadgeVariant, paymentStatusLabels } from "@/lib/payment-status";
 import { getPropertyImageUrls } from "@/lib/property-image-url";
 import logo from "@/assets/logo.png";
 
@@ -53,6 +55,7 @@ function AdminPage() {
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState(false);
   const [editingProperty, setEditingProperty] = useState<PropertyWithImages | null>(null);
+  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [section, setSection] = useState<AdminSection>("resumen");
   const roleQuery = useQuery({
@@ -302,6 +305,9 @@ function AdminPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">{booking.status}</Badge>
+                      <Badge variant={paymentStatusBadgeVariant[booking.payment_status]}>
+                        {paymentStatusLabels[booking.payment_status]}
+                      </Badge>
                       {booking.status === "pending" && (
                         <>
                           <Button
@@ -325,6 +331,9 @@ function AdminPage() {
                           </Button>
                         </>
                       )}
+                      <Button size="sm" variant="ghost" onClick={() => setDetailBookingId(booking.id)}>
+                        Detalle
+                      </Button>
                     </div>
                   </div>
                 ))
@@ -481,6 +490,16 @@ function AdminPage() {
           )}
         </DialogContent>
       </Dialog>
+      {(() => {
+        const detailBooking = bookings.find((b) => b.id === detailBookingId);
+        return detailBooking ? (
+          <BookingDetailDialog
+            booking={detailBooking}
+            adminUserId={user.id}
+            onClose={() => setDetailBookingId(null)}
+          />
+        ) : null;
+      })()}
     </div>
   );
 }
