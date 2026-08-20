@@ -20,7 +20,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
@@ -53,12 +60,49 @@ export function BookingDetailDialog({
 }) {
   const queryClient = useQueryClient();
   const [type, setType] = useState<"charge" | "refund">("charge");
-  const [amount, setAmount] = useState("");
+
+  const [amount, setAmount] = useState(() => {
+    const total = Number(booking.total_amount) || 0;
+    const pagado = Number(booking.amount_paid) || 0;
+    const restante = total - pagado;
+    return restante > 0 ? String(restante) : "";
+  });
+
   const [method, setMethod] = useState("efectivo");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [formError, setFormError] = useState("");
+
+  function handleTypeChange(newType: "charge" | "refund") {
+    setType(newType);
+    const total = Number(booking.total_amount) || 0;
+
+    if (newType === "charge") {
+      const pagado = Number(booking.amount_paid) || 0;
+      const restante = total - pagado;
+      setAmount(restante > 0 ? String(restante) : "");
+    } else {
+      // Forzamos a que el reembolso siempre tome el monto total de la reserva
+      const reembolsado = Number(booking.amount_refunded) || 0;
+      const porReembolsar = total - reembolsado;
+      setAmount(porReembolsar > 0 ? String(porReembolsar) : "");
+    }
+  }
+
+  const clientQuery = useQuery({
+    queryKey: ["client-profile", booking.user_id],
+    queryFn: async () => {
+      if (!booking.user_id) return null;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("full_name, phone")
+        .eq("id", booking.user_id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
 
   const transactionsQuery = useQuery({
     queryKey: ["booking-transactions", booking.id],
@@ -89,7 +133,7 @@ export function BookingDetailDialog({
   const recordTransaction = useMutation({
     mutationFn: async () => {
       const parsed = Number(amount);
-      if (!parsed || parsed <= 0) throw new Error("Ingresa un monto válido.");
+      if (!parsed || parsed <= 0) throw new Error("El monto a registrar debe ser mayor a 0.");
       const { error } = await supabase.from("booking_transactions").insert({
         booking_id: booking.id,
         type,
@@ -106,6 +150,7 @@ export function BookingDetailDialog({
       setReference("");
       setNote("");
       setFormError("");
+      handleTypeChange("charge");
       queryClient.invalidateQueries({ queryKey: ["booking-transactions", booking.id] });
       queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
     },
@@ -136,8 +181,15 @@ export function BookingDetailDialog({
           <DialogTitle className="font-display text-2xl">
             {booking.properties?.name ?? "Reserva"}
           </DialogTitle>
-          <DialogDescription>
-            {booking.check_in} → {booking.check_out} · {formatCurrencyDOP(Number(booking.total_amount))}
+          <DialogDescription className="space-y-1">
+            <span className="block font-medium text-foreground">
+              Cliente: {clientQuery.data?.full_name ?? "Cargando..."}
+              {clientQuery.data?.phone ? ` (${clientQuery.data.phone})` : ""}
+            </span>
+            <span className="block">
+              {booking.check_in} → {booking.check_out} ·{" "}
+              {formatCurrencyDOP(Number(booking.total_amount))}
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -203,7 +255,10 @@ export function BookingDetailDialog({
           <div className="mt-4 grid gap-3 rounded-xl border border-dashed border-border p-4 sm:grid-cols-2">
             <div>
               <Label>Tipo</Label>
-              <Select value={type} onValueChange={(value) => setType(value as "charge" | "refund")}>
+              <Select
+                value={type}
+                onValueChange={(value) => handleTypeChange(value as "charge" | "refund")}
+              >
                 <SelectTrigger className="mt-1">
                   <SelectValue />
                 </SelectTrigger>
@@ -216,12 +271,12 @@ export function BookingDetailDialog({
             <div>
               <Label>Monto</Label>
               <Input
-                className="mt-1"
+                className="mt-1 bg-muted/50 cursor-not-allowed"
                 type="number"
                 min="0"
                 step="0.01"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                readOnly
               />
             </div>
             <div>
@@ -240,7 +295,11 @@ export function BookingDetailDialog({
             </div>
             <div>
               <Label>Referencia (opcional)</Label>
-              <Input className="mt-1" value={reference} onChange={(e) => setReference(e.target.value)} />
+              <Input
+                className="mt-1"
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+              />
             </div>
             <div className="sm:col-span-2">
               <Label>Nota (opcional)</Label>
@@ -249,7 +308,7 @@ export function BookingDetailDialog({
             {formError && <p className="text-sm text-destructive sm:col-span-2">{formError}</p>}
             <Button
               className="sm:col-span-2"
-              disabled={recordTransaction.isPending}
+              disabled={recordTransaction.isPending || Number(amount) <= 0}
               onClick={() => recordTransaction.mutate()}
             >
               Registrar movimiento

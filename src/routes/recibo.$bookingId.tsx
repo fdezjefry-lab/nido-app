@@ -19,6 +19,9 @@ import {
   transactionTypeLabels,
 } from "@/lib/payment-status";
 
+// Importamos el logo directamente desde la carpeta assets
+import logo from "@/assets/logo.png";
+
 export const Route = createFileRoute("/recibo/$bookingId")({
   ssr: false,
   beforeLoad: async () => {
@@ -91,7 +94,8 @@ function ReceiptPage() {
         <div className="mt-8 rounded-2xl border border-border bg-card p-8 print:border-0 print:p-0">
           <div className="flex items-start justify-between">
             <div>
-              <p className="font-display text-2xl">Nido.</p>
+              {/* Aquí aumentamos el tamaño a h-16 (el doble de grande) y le dimos más margen inferior (mb-2) */}
+              <img src={logo} alt="Logo Nido" className="h-16 w-auto object-contain mb-2" />
               <p className="text-sm text-muted-foreground">Recibo de reserva</p>
             </div>
             <p className="text-sm text-muted-foreground">

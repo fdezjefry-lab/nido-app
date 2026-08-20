@@ -5,14 +5,13 @@ import {
   CalendarCheck,
   Check,
   Clock3,
-  Euro,
   LayoutDashboard,
   LogOut,
   Plus,
   Settings,
-  Trash2,
   Users,
   X,
+  Banknote,
 } from "lucide-react";
 import { useState } from "react";
 import { BookingDetailDialog } from "@/components/admin/booking-detail-dialog";
@@ -32,12 +31,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { claimAdmin } from "@/lib/admin.functions";
-import { paymentStatusBadgeVariant, paymentStatusLabels } from "@/lib/payment-status";
+import {
+  paymentStatusBadgeVariant,
+  paymentStatusLabels,
+  formatCurrencyDOP,
+} from "@/lib/payment-status";
 import { getPropertyImageUrls } from "@/lib/property-image-url";
 import logo from "@/assets/logo.png";
 
 type PropertyWithImages = Tables<"properties"> & { property_images: Tables<"property_images">[] };
-type AdminSection = "resumen" | "alojamientos" | "solicitudes" | "clientes";
+type AdminSection = "resumen" | "alojamientos" | "solicitudes" | "clientes" | "finanzas";
 
 export const Route = createFileRoute("/admin")({
   ssr: false,
@@ -155,17 +158,7 @@ function AdminPage() {
     },
     onError: (error: Error) => setNotice(error.message),
   });
-  const deleteProperty = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("properties").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      setNotice("Alojamiento eliminado.");
-      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-    },
-    onError: (error: Error) => setNotice(error.message),
-  });
+
   if (roleQuery.isLoading)
     return <div className="grid min-h-screen place-items-center">Comprobando acceso…</div>;
   if (!roleQuery.data)
@@ -186,9 +179,57 @@ function AdminPage() {
         </div>
       </main>
     );
+
   const properties = propertiesQuery.data ?? [];
   const bookings = bookingsQuery.data ?? [];
   const pending = bookings.filter((item) => item.status === "pending");
+
+  // --- LÓGICA DE HISTORIAL FINANCIERO MENSUAL ---
+  // Agrupamos todas las reservas por mes usando 'reduce'
+  const historialMensual = bookings.reduce(
+    (acc, b) => {
+      if (!b.created_at) return acc;
+
+      const fecha = new Date(b.created_at);
+      // Creamos una llave para ordenar (ej: "2026-08")
+      const sortKey = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}`;
+      // Creamos una etiqueta amigable (ej: "agosto 2026")
+      const labelMes = fecha.toLocaleDateString("es-DO", { month: "long", year: "numeric" });
+
+      if (!acc[sortKey]) {
+        acc[sortKey] = {
+          key: sortKey,
+          label: labelMes,
+          ganancias: 0,
+          devoluciones: 0,
+          transacciones: [],
+        };
+      }
+
+      const monto = Number(b.total_amount) || 0;
+      const statusPago = b.payment_status;
+
+      if (statusPago === "refunded" || statusPago === "partially_refunded") {
+        acc[sortKey].devoluciones += monto;
+      } else if (statusPago === "paid") {
+        if (b.status === "approved") {
+          acc[sortKey].ganancias += monto;
+        }
+      }
+
+      acc[sortKey].transacciones.push(b);
+      return acc;
+    },
+    {} as Record<
+      string,
+      { key: string; label: string; ganancias: number; devoluciones: number; transacciones: any[] }
+    >,
+  );
+
+  // Convertimos el objeto a un arreglo y lo ordenamos (el mes más reciente primero)
+  const mesesOrdenados = Object.values(historialMensual).sort((a, b) => b.key.localeCompare(a.key));
+  // --- FIN LÓGICA FINANZAS ---
+
   return (
     <div className="min-h-screen bg-muted/50 lg:grid lg:grid-cols-[240px_1fr]">
       <aside className="hidden min-h-screen border-r border-border bg-card p-6 lg:flex lg:flex-col">
@@ -223,6 +264,13 @@ function AdminPage() {
             onClick={() => setSection("clientes")}
           >
             <Users /> Clientes
+          </Button>
+          <Button
+            variant={section === "finanzas" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => setSection("finanzas")}
+          >
+            <Banknote /> Finanzas
           </Button>
         </nav>
         <Button
@@ -261,7 +309,8 @@ function AdminPage() {
           </Dialog>
         </header>
         {notice && <p className="mt-5 rounded-xl bg-card p-3 text-sm">{notice}</p>}
-        <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+        <section className="mt-8 grid gap-4 sm:grid-cols-3">
           <Stat label="Alojamientos" value={properties.length} icon={<Building2 />} />
           <Stat label="Pendientes" value={pending.length} icon={<Clock3 />} />
           <Stat
@@ -269,19 +318,9 @@ function AdminPage() {
             value={bookings.filter((b) => b.status === "approved").length}
             icon={<CalendarCheck />}
           />
-          <Stat
-            label="Valor de reservaciones"
-            value={bookings
-              .filter((b) => b.status === "approved")
-              .reduce((sum, b) => sum + Number(b.total_amount), 0)
-              .toLocaleString("es-DO", {
-                style: "currency",
-                currency: "DOP",
-                maximumFractionDigits: 0,
-              })}
-            icon={<Euro />}
-          />
         </section>
+
+        {/* SECCIÓN RESUMEN O SOLICITUDES */}
         {(section === "resumen" || section === "solicitudes") && (
           <section className="mt-10">
             <div className="mb-5 flex items-end justify-between">
@@ -306,7 +345,7 @@ function AdminPage() {
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">{booking.status}</Badge>
                       <Badge variant={paymentStatusBadgeVariant[booking.payment_status]}>
-                        {paymentStatusLabels[booking.payment_status]}
+                        {paymentStatusLabels[booking.payment_status] || booking.payment_status}
                       </Badge>
                       {booking.status === "pending" && (
                         <>
@@ -331,7 +370,11 @@ function AdminPage() {
                           </Button>
                         </>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => setDetailBookingId(booking.id)}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setDetailBookingId(booking.id)}
+                      >
                         Detalle
                       </Button>
                     </div>
@@ -343,6 +386,8 @@ function AdminPage() {
             </div>
           </section>
         )}
+
+        {/* SECCIÓN ALOJAMIENTOS */}
         {(section === "resumen" || section === "alojamientos") && (
           <section className="mt-10">
             <h2 className="mb-5 font-display text-3xl">Alojamientos</h2>
@@ -368,13 +413,7 @@ function AdminPage() {
                       </Badge>
                     </div>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {property.city} ·{" "}
-                      {Number(property.price_per_night).toLocaleString("es-DO", {
-                        style: "currency",
-                        currency: "DOP",
-                        maximumFractionDigits: 0,
-                      })}
-                      /noche
+                      {property.city} · {formatCurrencyDOP(Number(property.price_per_night))}/noche
                     </p>
                     <div className="mt-4 flex gap-2">
                       <Button
@@ -399,22 +438,6 @@ function AdminPage() {
                       >
                         Editar
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              `¿Eliminar "${property.name}"? Esta acción no se puede deshacer.`,
-                            )
-                          ) {
-                            deleteProperty.mutate(property.id);
-                          }
-                        }}
-                      >
-                        <Trash2 />
-                      </Button>
                     </div>
                   </div>
                 </article>
@@ -422,6 +445,8 @@ function AdminPage() {
             </div>
           </section>
         )}
+
+        {/* SECCIÓN CLIENTES */}
         {section === "clientes" && (
           <section className="mt-10">
             <h2 className="mb-5 font-display text-3xl">Clientes</h2>
@@ -450,7 +475,90 @@ function AdminPage() {
             </div>
           </section>
         )}
+
+        {/* NUEVA SECCIÓN FINANZAS CON HISTORIAL */}
+        {section === "finanzas" && (
+          <section className="mt-10">
+            <h2 className="mb-5 font-display text-3xl">Historial Financiero</h2>
+
+            <div className="space-y-8">
+              {mesesOrdenados.length > 0 ? (
+                mesesOrdenados.map((mes) => (
+                  <div
+                    key={mes.key}
+                    className="overflow-hidden rounded-2xl border border-border bg-card"
+                  >
+                    {/* Encabezado del mes */}
+                    <div className="border-b border-border bg-muted/50 p-5">
+                      <h3 className="font-display text-2xl capitalize">{mes.label}</h3>
+                    </div>
+
+                    {/* Resumen del mes */}
+                    <div className="grid gap-4 border-b border-border bg-muted/20 p-5 sm:grid-cols-2">
+                      <div>
+                        <p className="text-sm text-muted-foreground">
+                          Ganancias (Pagos de reservas aprobadas)
+                        </p>
+                        <p className="mt-1 text-3xl font-display text-green-600">
+                          {formatCurrencyDOP(mes.ganancias)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Total Devuelto (Reembolsos)</p>
+                        <p className="mt-1 text-3xl font-display text-red-600">
+                          {formatCurrencyDOP(mes.devoluciones)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Transacciones de ese mes */}
+                    <div className="p-5">
+                      <h4 className="mb-4 text-sm font-semibold text-muted-foreground">
+                        Transacciones del mes
+                      </h4>
+                      <div className="space-y-3">
+                        {mes.transacciones.map((booking) => (
+                          <div
+                            key={booking.id}
+                            className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border p-4"
+                          >
+                            <div>
+                              <p className="font-semibold">{booking.properties?.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {new Date(booking.created_at).toLocaleDateString("es-DO")} · Estado:{" "}
+                                {booking.status}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold">
+                                {formatCurrencyDOP(Number(booking.total_amount))}
+                              </p>
+                              <Badge
+                                variant={paymentStatusBadgeVariant[booking.payment_status]}
+                                className="mt-1"
+                              >
+                                {paymentStatusLabels[booking.payment_status] ||
+                                  booking.payment_status}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-border bg-card p-8 text-center">
+                  <p className="text-muted-foreground">
+                    No hay movimientos financieros registrados.
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
       </main>
+
       <Dialog
         open={Boolean(editingProperty)}
         onOpenChange={(open) => !open && setEditingProperty(null)}
