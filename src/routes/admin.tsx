@@ -16,6 +16,7 @@ import {
 import { useState } from "react";
 import { BookingDetailDialog } from "@/components/admin/booking-detail-dialog";
 import { PropertyForm, type PropertyFormValues } from "@/components/admin/property-form";
+import { PropertyImageManager } from "@/components/admin/property-image-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,14 +99,14 @@ function AdminPage() {
     },
   });
 
-  const clientIds = Array.from(
-    new Set((bookingsQuery.data ?? []).map((b) => b.user_id).filter(Boolean)),
-  );
   const clientsQuery = useQuery({
-    queryKey: ["admin-clients", clientIds],
-    enabled: roleQuery.data === true && clientIds.length > 0,
+    queryKey: ["admin-clients"],
+    enabled: roleQuery.data === true,
     queryFn: async () => {
-      const { data, error } = await supabase.from("profiles").select("*").in("id", clientIds);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
@@ -133,47 +134,7 @@ function AdminPage() {
     }
   }
 
-  async function uploadImagesToSupabase(
-    propertyId: string,
-    propertyName: string,
-    files: File[],
-    startIndex: number,
-  ) {
-    const uploadPromises = files.map(async (file, index) => {
-      const ext = file.name.split(".").pop() || "jpg";
-      const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf("."));
-      const safeName =
-        nameWithoutExt
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-zA-Z0-9]/g, "-")
-          .replace(/-+/g, "")
-          .replace(/(^-|-$)/g, "") || "foto";
-      const uuid =
-        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : Math.random().toString(36).substring(2, 15);
-      const path = `${propertyId}/${uuid}-${safeName}.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("property-images")
-        .upload(path, file);
-      if (uploadError) throw uploadError;
-
-      return {
-        property_id: propertyId,
-        storage_path: path,
-        alt_text: `${propertyName} - foto`,
-        sort_order: startIndex + index + 1,
-      };
-    });
-
-    const imageRecords = await Promise.all(uploadPromises);
-    const { error: insertError } = await supabase.from("property_images").insert(imageRecords);
-    if (insertError) throw insertError;
-  }
-
-  const handleCreateProperty = async (values: PropertyFormValues, newFiles: File[]) => {
+  const handleCreateProperty = async (values: PropertyFormValues) => {
     setIsSaving(true);
     setNotice("");
     try {
@@ -190,13 +151,10 @@ function AdminPage() {
         .single();
       if (propErr) throw propErr;
 
-      if (newFiles.length > 0) {
-        await uploadImagesToSupabase(newProp.id, values.name, newFiles, 0);
-      }
-
-      setNotice("Alojamiento y fotos guardados exitosamente.");
+      setNotice("Alojamiento creado. Ahora puedes agregar sus fotos.");
       setDialog(false);
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      setEditingProperty({ ...newProp, property_images: [] });
     } catch (err: any) {
       setNotice(err.message);
     } finally {
@@ -204,17 +162,12 @@ function AdminPage() {
     }
   };
 
-  const handleUpdateProperty = async (id: string, values: PropertyFormValues, newFiles: File[]) => {
+  const handleUpdateProperty = async (id: string, values: PropertyFormValues) => {
     setIsSaving(true);
     setNotice("");
     try {
       const { error: propErr } = await supabase.from("properties").update(values).eq("id", id);
       if (propErr) throw propErr;
-
-      if (newFiles.length > 0) {
-        const existingCount = editingProperty?.property_images?.length || 0;
-        await uploadImagesToSupabase(id, values.name, newFiles, existingCount);
-      }
 
       setNotice("Alojamiento actualizado.");
       setEditingProperty(null);
@@ -223,22 +176,6 @@ function AdminPage() {
       setNotice(err.message);
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleDeleteExistingImage = async (imageId: string, storagePath: string) => {
-    try {
-      await supabase.storage.from("property-images").remove([storagePath]);
-      await supabase.from("property_images").delete().eq("id", imageId);
-      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      if (editingProperty) {
-        setEditingProperty({
-          ...editingProperty,
-          property_images: editingProperty.property_images.filter((img) => img.id !== imageId),
-        });
-      }
-    } catch (err: any) {
-      setNotice("Error al borrar la foto: " + err.message);
     }
   };
 
@@ -363,7 +300,8 @@ function AdminPage() {
               <DialogHeader>
                 <DialogTitle className="font-display text-2xl">Nuevo alojamiento</DialogTitle>
                 <DialogDescription>
-                  Ingresa todos los detalles de la cabaña y sube sus fotos en un solo lugar.
+                  Ingresa los detalles de la cabaña; podrás agregar sus fotos justo después de
+                  crearla.
                 </DialogDescription>
               </DialogHeader>
               <PropertyForm
@@ -548,6 +486,9 @@ function AdminPage() {
                     >
                       <div>
                         <p className="font-semibold">{nameText}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {client.phone || "Sin teléfono"}
+                        </p>
                       </div>
                       <Badge variant="secondary">{clientBookings.length} solicitudes</Badge>
                     </div>
@@ -748,19 +689,21 @@ function AdminPage() {
             </DialogTitle>
           </DialogHeader>
           {editingProperty && (
-            <PropertyForm
-              defaultValues={editingProperty}
-              existingImages={editingProperty.property_images.map((img) => ({
-                id: img.id,
-                storage_path: img.storage_path,
-                url: supabase.storage.from("property-images").getPublicUrl(img.storage_path).data
-                  .publicUrl,
-              }))}
-              onDeleteExistingImage={handleDeleteExistingImage}
-              submitLabel="Guardar cambios"
-              isSubmitting={isSaving}
-              onSubmit={(values, files) => handleUpdateProperty(editingProperty.id, values, files)}
-            />
+            <div className="space-y-8">
+              <PropertyForm
+                defaultValues={editingProperty}
+                submitLabel="Guardar cambios"
+                isSubmitting={isSaving}
+                onSubmit={(values) => handleUpdateProperty(editingProperty.id, values)}
+              />
+              <div className="rounded-3xl border border-border p-6 bg-muted/20">
+                <h3 className="font-display text-xl mb-4">Fotos</h3>
+                <PropertyImageManager
+                  propertyId={editingProperty.id}
+                  propertyName={editingProperty.name}
+                />
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>
