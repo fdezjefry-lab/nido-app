@@ -1,13 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { ArrowLeft, Chrome } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { lovable } from "@/integrations/lovable";
 import { supabase } from "@/integrations/supabase/client";
 
-// Importamos el logo y la nueva imagen de fondo desde assets
+// Importamos el logo y la imagen de fondo desde assets
 import logoImg from "@/assets/logo.png";
 import bgImg from "@/assets/a.jpg";
 
@@ -36,6 +35,11 @@ function AuthPage() {
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  // Estados para ver/ocultar contraseñas
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -46,7 +50,6 @@ function AuthPage() {
     setMessage("");
 
     if (mode === "signup") {
-      // Expresión regular para permitir solo letras y espacios (incluye acentos y ñ)
       const nameRegex = /^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/;
 
       if (nombre.trim().length < 3 || !nameRegex.test(nombre)) {
@@ -61,19 +64,26 @@ function AuthPage() {
         return;
       }
 
-      // Validación de contraseña: exactamente 8 caracteres y empieza con mayúscula
       if (!/^[A-Z]/.test(password)) {
         setMessage("La contraseña debe empezar por una letra mayúscula.");
         setLoading(false);
         return;
       }
-      if (password.length !== 8) {
-        setMessage("La contraseña debe tener exactamente 8 caracteres.");
+
+      // Validación de mínimo 8 caracteres
+      if (password.length < 8) {
+        setMessage("La contraseña debe tener al menos 8 caracteres.");
         setLoading(false);
         return;
       }
 
-      // Proceso de registro en Supabase
+      // Validación de confirmación de contraseña
+      if (password !== confirmPassword) {
+        setMessage("Las contraseñas no coinciden.");
+        setLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -89,28 +99,43 @@ function AuthPage() {
       });
 
       if (!error && data.user) {
-        // Guardamos el nombre completo en la tabla perfiles
+        // SOLUCIÓN: Agregamos el teléfono explícitamente a la tabla 'profiles'
         await supabase.from("profiles").upsert({
           id: data.user.id,
           full_name: `${nombre.trim()} ${apellido.trim()}`,
+          phone: telefono.trim(),
         });
         await supabase.from("user_roles").upsert({ user_id: data.user.id, role: "customer" });
       }
       setMessage(error ? error.message : "Revisa tu correo para confirmar la cuenta.");
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage(error.message);
-      else if (redirect) window.location.href = redirect;
-      else await navigate({ to: "/cuenta" });
+      // PROCESO DE INICIO DE SESIÓN
+      const { data: signInData, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        setMessage(error.message);
+      } else if (redirect) {
+        window.location.href = redirect;
+      } else if (signInData.user) {
+        // Consultar el rol del usuario que acaba de iniciar sesión
+        const { data: roleData } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", signInData.user.id)
+          .maybeSingle();
+
+        // Redirigir según el rol
+        if (roleData?.role === "admin") {
+          await navigate({ to: "/admin" });
+        } else {
+          await navigate({ to: "/" });
+        }
+      }
     }
     setLoading(false);
-  }
-
-  async function google() {
-    const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: `${window.location.origin}${redirect ?? "/cuenta"}`,
-    });
-    if (result.error) setMessage(result.error.message);
   }
 
   return (
@@ -145,20 +170,11 @@ function AuthPage() {
             {mode === "login" ? "Bienvenidos a su próxima estadía" : "Crea tu cuenta"}
           </h1>
 
-          <p className="mt-2 text-muted-foreground">
+          <p className="mt-2 mb-8 text-muted-foreground">
             {mode === "login"
               ? "Consulta tus solicitudes y próximas estancias."
               : "Guarda tus datos y solicita alojamientos."}
           </p>
-
-          <Button variant="outline" size="lg" className="mt-8 w-full" onClick={google}>
-            <Chrome /> Continuar con Google
-          </Button>
-
-          <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />o con correo
-            <span className="h-px flex-1 bg-border" />
-          </div>
 
           <form onSubmit={submit} className="space-y-4">
             {mode === "signup" && (
@@ -242,24 +258,61 @@ function AuthPage() {
 
             <div>
               <Label htmlFor="password">Contraseña</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                minLength={8}
-                maxLength={8}
-                pattern="^[A-Z].*"
-                title="La contraseña debe empezar con una letra mayúscula y tener exactamente 8 caracteres."
-                required
-                className="mt-2 h-11"
-              />
+              <div className="relative mt-2">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  minLength={8}
+                  pattern="^[A-Z].*"
+                  title="La contraseña debe empezar con una letra mayúscula y tener un mínimo de 8 caracteres."
+                  required
+                  className="h-11 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-muted-foreground hover:text-foreground focus:outline-none"
+                >
+                  {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+                </button>
+              </div>
               {mode === "signup" && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Debe empezar con mayúscula y tener exactamente 8 caracteres.
+                  Debe empezar con mayúscula y tener mínimo 8 caracteres.
                 </p>
               )}
             </div>
+
+            {mode === "signup" && (
+              <div>
+                <Label htmlFor="confirmPassword">Confirmar contraseña</Label>
+                <div className="relative mt-2">
+                  <Input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    minLength={8}
+                    required
+                    className="h-11 pr-10"
+                    placeholder="Repite tu contraseña"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-3 text-muted-foreground hover:text-foreground focus:outline-none"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="size-5" />
+                    ) : (
+                      <Eye className="size-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {message && (
               <p className="rounded-xl bg-muted p-3 text-sm text-destructive font-medium">

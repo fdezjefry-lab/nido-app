@@ -1,12 +1,14 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, BedDouble, MapPin, Users } from "lucide-react";
+import { ArrowUpRight, BedDouble, MapPin, Users, Image as ImageIcon } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { getPropertyImageUrls } from "@/lib/property-image-url";
 
 type PropertyWithImages = Tables<"properties"> & { property_images: Tables<"property_images">[] };
 
 export function PropertyCard({ property }: { property: PropertyWithImages }) {
-  const image = getPropertyImageUrls(property.property_images)[0];
+  // Verificamos si realmente existen imágenes en la base de datos para esta propiedad
+  const hasImages = property.property_images && property.property_images.length > 0;
+  const image = hasImages ? getPropertyImageUrls(property.property_images)[0] : null;
 
   return (
     <article className="group">
@@ -15,14 +17,21 @@ export function PropertyCard({ property }: { property: PropertyWithImages }) {
         params={{ slug: property.slug }}
         className="block overflow-hidden rounded-3xl bg-muted"
       >
-        <img
-          src={image}
-          alt={property.name}
-          width={1344}
-          height={896}
-          loading="lazy"
-          className="aspect-[4/3] w-full object-cover transition duration-700 group-hover:scale-105"
-        />
+        {image ? (
+          <img
+            src={image}
+            alt={property.name}
+            width={1344}
+            height={896}
+            loading="lazy"
+            className="aspect-[4/3] w-full object-cover transition duration-700 group-hover:scale-105"
+          />
+        ) : (
+          <div className="aspect-[4/3] w-full bg-muted/60 flex flex-col items-center justify-center text-muted-foreground transition duration-700 group-hover:scale-105 border-b border-border">
+            <ImageIcon className="size-10 mb-2 opacity-30" />
+            <span className="text-sm font-medium opacity-60">Imágenes próximamente</span>
+          </div>
+        )}
       </Link>
       <div className="pt-4">
         <div className="flex items-start justify-between gap-4">

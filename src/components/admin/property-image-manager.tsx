@@ -21,6 +21,8 @@ export function PropertyImageManager({
 }) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState("");
 
   const queryKey = ["admin-property-images", propertyId];
@@ -33,44 +35,75 @@ export function PropertyImageManager({
         .eq("property_id", propertyId)
         .order("sort_order");
       if (error) throw error;
-      return data;
+      return data || [];
     },
   });
 
   const images = imagesQuery.data ?? [];
 
-  const uploadImages = useMutation({
-    mutationFn: async (list: File[]) => {
-      if (images.length + list.length > MAX_IMAGES) {
-        throw new Error(`Máximo ${MAX_IMAGES} imágenes por alojamiento.`);
-      }
+  // Función asíncrona plana, sin useMutation para evadir el crash de Chrome DevTools
+  const handleUploadFiles = async (files: File[]) => {
+    if (images.length + files.length > MAX_IMAGES) {
+      setError(`Máximo ${MAX_IMAGES} imágenes.`);
+      return;
+    }
+
+    setIsUploading(true);
+    setError("");
+
+    try {
       let nextSortOrder = images.reduce((max, img) => Math.max(max, img.sort_order), -1) + 1;
-      for (const file of list) {
-        if (!ALLOWED_TYPES.includes(file.type)) {
-          throw new Error(`Formato no permitido: ${file.name}. Usa JPG, PNG o WebP.`);
-        }
-        if (file.size > MAX_FILE_BYTES) {
-          throw new Error(`${file.name} pesa más de 8 MB.`);
-        }
-        const path = `${propertyId}/${crypto.randomUUID()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, file);
+
+      // Ciclo secuencial para asegurar que se suban TODAS las fotos elegidas sin colapsar Supabase
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        if (!ALLOWED_TYPES.includes(file.type))
+          throw new Error(`Formato no permitido: ${file.name}`);
+        if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} pesa más de 8 MB.`);
+
+        const ext = file.name.split(".").pop() || "jpg";
+        const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
+
+        const safeName =
+          nameWithoutExt
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-zA-Z0-9]/g, "-")
+            .replace(/-+/g, "")
+            .replace(/(^-|-$)/g, "") || `foto-${i}`;
+
+        const uuid =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : Math.random().toString(36).substring(2, 15);
+
+        const path = `${propertyId}/${uuid}-${safeName}.${ext}`;
+
+        const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, file, {
+          contentType: file.type,
+          upsert: false,
+        });
         if (uploadError) throw uploadError;
+
         const { error: insertError } = await supabase.from("property_images").insert({
           property_id: propertyId,
           storage_path: path,
-          alt_text: `${propertyName} - foto ${nextSortOrder + 1}`,
+          alt_text: `${propertyName} - foto`,
           sort_order: nextSortOrder,
         });
         if (insertError) throw insertError;
-        nextSortOrder += 1;
+
+        nextSortOrder++;
       }
-    },
-    onSuccess: () => {
-      setError("");
-      queryClient.invalidateQueries({ queryKey });
-    },
-    onError: (err: Error) => setError(err.message),
-  });
+
+      await queryClient.invalidateQueries({ queryKey });
+    } catch (err: any) {
+      setError(err.message || "Ocurrió un error al subir las fotos.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const deleteImage = useMutation({
     mutationFn: async (image: PropertyImage) => {
@@ -84,10 +117,7 @@ export function PropertyImageManager({
         .eq("id", image.id);
       if (deleteError) throw deleteError;
     },
-    onSuccess: () => {
-      setError("");
-      queryClient.invalidateQueries({ queryKey });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
     onError: (err: Error) => setError(err.message),
   });
 
@@ -129,10 +159,10 @@ export function PropertyImageManager({
           type="button"
           size="sm"
           variant="outline"
-          disabled={uploadImages.isPending}
+          disabled={isUploading}
           onClick={() => fileInputRef.current?.click()}
         >
-          {uploadImages.isPending ? <Loader2 className="animate-spin" /> : <Upload />}
+          {isUploading ? <Loader2 className="animate-spin" /> : <Upload />}
           Subir fotos
         </Button>
         <input
@@ -143,15 +173,23 @@ export function PropertyImageManager({
           className="hidden"
           onChange={(event) => {
             const files = Array.from(event.target.files ?? []);
-            event.target.value = "";
-            if (files.length) uploadImages.mutate(files);
+
+            // EL TRUCO PARA CHROME: Vaciamos el input en segundo plano (0ms después)
+            // para que React no choque con el navegador.
+            setTimeout(() => {
+              if (event.target) event.target.value = "";
+            }, 0);
+
+            if (files.length > 0) {
+              handleUploadFiles(files);
+            }
           }}
         />
       </div>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       {imagesQuery.isLoading ? (
         <p className="mt-4 text-sm text-muted-foreground">Cargando imágenes…</p>
-      ) : images.length ? (
+      ) : images.length > 0 ? (
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {images.map((image, index) => (
             <div
@@ -171,7 +209,6 @@ export function PropertyImageManager({
                   className="size-8"
                   disabled={index === 0 || moveImage.isPending}
                   onClick={() => moveImage.mutate({ image, direction: "up" })}
-                  aria-label="Mover antes"
                 >
                   <ArrowUp className="size-4" />
                 </Button>
@@ -182,7 +219,6 @@ export function PropertyImageManager({
                   className="size-8"
                   disabled={index === images.length - 1 || moveImage.isPending}
                   onClick={() => moveImage.mutate({ image, direction: "down" })}
-                  aria-label="Mover después"
                 >
                   <ArrowDown className="size-4" />
                 </Button>
@@ -193,7 +229,6 @@ export function PropertyImageManager({
                   className="size-8"
                   disabled={deleteImage.isPending}
                   onClick={() => deleteImage.mutate(image)}
-                  aria-label="Eliminar imagen"
                 >
                   <Trash2 className="size-4" />
                 </Button>
