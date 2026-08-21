@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { addDays, differenceInCalendarDays, format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -37,6 +37,7 @@ export const Route = createFileRoute("/alojamientos/$slug")({
 
 function PropertyDetail() {
   const { slug } = Route.useParams();
+  const navigate = useNavigate();
   const [range, setRange] = useState<DateRange | undefined>();
   const [guests, setGuests] = useState(1);
   const [message, setMessage] = useState("");
@@ -72,20 +73,22 @@ function PropertyDetail() {
     }
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        navigate({ to: "/auth", search: { redirect: window.location.pathname } });
+        return;
+      }
+
       // 1. Agregamos "guests" para cumplir con la regla estricta de tu base de datos
       const bookingData: any = {
         property_id: property.id,
+        user_id: sessionData.session.user.id,
         check_in: format(range.from, "yyyy-MM-dd"),
         check_out: format(range.to, "yyyy-MM-dd"),
         guests: guests, // <--- ¡AQUÍ ESTABA EL DETALLE!
         total_amount: total,
         status: "pending",
       };
-
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user?.id) {
-        bookingData.user_id = authData.user.id;
-      }
 
       // 2. Registramos la solicitud
       const { error: insertError } = await supabase.from("booking_requests").insert(bookingData);

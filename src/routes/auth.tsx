@@ -98,15 +98,6 @@ function AuthPage() {
         },
       });
 
-      if (!error && data.user) {
-        // SOLUCIÓN: Agregamos el teléfono explícitamente a la tabla 'profiles'
-        await supabase.from("profiles").upsert({
-          id: data.user.id,
-          full_name: `${nombre.trim()} ${apellido.trim()}`,
-          phone: telefono.trim(),
-        });
-        await supabase.from("user_roles").upsert({ user_id: data.user.id, role: "customer" });
-      }
       setMessage(error ? error.message : "Revisa tu correo para confirmar la cuenta.");
     } else {
       // PROCESO DE INICIO DE SESIÓN
