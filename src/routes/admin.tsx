@@ -60,6 +60,8 @@ function AdminPage() {
   const [dialog, setDialog] = useState(false);
   const [editingProperty, setEditingProperty] = useState<PropertyWithImages | null>(null);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
+  const [draftProperty, setDraftProperty] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState("");
   const [section, setSection] = useState<AdminSection>("resumen");
   const [isSaving, setIsSaving] = useState(false);
@@ -151,10 +153,9 @@ function AdminPage() {
         .single();
       if (propErr) throw propErr;
 
-      setNotice("Alojamiento creado. Ahora puedes agregar sus fotos.");
-      setDialog(false);
+      setNotice("Alojamiento creado. Agrega sus fotos abajo.");
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      setEditingProperty({ ...newProp, property_images: [] });
+      setDraftProperty({ id: newProp.id, name: newProp.name });
     } catch (err: any) {
       setNotice(err.message);
     } finally {
@@ -290,7 +291,13 @@ function AdminPage() {
             <p className="text-sm text-muted-foreground">Panel privado</p>
             <h1 className="font-display text-4xl">Buenos días</h1>
           </div>
-          <Dialog open={dialog} onOpenChange={setDialog}>
+          <Dialog
+            open={dialog}
+            onOpenChange={(open) => {
+              setDialog(open);
+              if (!open) setDraftProperty(null);
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus /> Nuevo alojamiento
@@ -298,17 +305,42 @@ function AdminPage() {
             </DialogTrigger>
             <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
               <DialogHeader>
-                <DialogTitle className="font-display text-2xl">Nuevo alojamiento</DialogTitle>
+                <DialogTitle className="font-display text-2xl">
+                  {draftProperty ? draftProperty.name : "Nuevo alojamiento"}
+                </DialogTitle>
                 <DialogDescription>
-                  Ingresa los detalles de la cabaña; podrás agregar sus fotos justo después de
-                  crearla.
+                  {draftProperty
+                    ? "Los datos se guardaron. Agrega sus fotos abajo y luego finaliza."
+                    : "Ingresa los detalles de la cabaña; podrás agregar sus fotos justo debajo, en este mismo paso."}
                 </DialogDescription>
               </DialogHeader>
-              <PropertyForm
-                submitLabel="Crear alojamiento"
-                isSubmitting={isSaving}
-                onSubmit={handleCreateProperty}
-              />
+              {draftProperty ? (
+                <div className="space-y-6">
+                  <div className="rounded-3xl border border-border p-6 bg-muted/20">
+                    <h3 className="font-display text-xl mb-4">Fotos</h3>
+                    <PropertyImageManager
+                      propertyId={draftProperty.id}
+                      propertyName={draftProperty.name}
+                    />
+                  </div>
+                  <Button
+                    size="lg"
+                    className="w-full h-14 rounded-full text-lg shadow-lg"
+                    onClick={() => {
+                      setDialog(false);
+                      setDraftProperty(null);
+                    }}
+                  >
+                    Finalizar
+                  </Button>
+                </div>
+              ) : (
+                <PropertyForm
+                  submitLabel="Crear alojamiento"
+                  isSubmitting={isSaving}
+                  onSubmit={handleCreateProperty}
+                />
+              )}
             </DialogContent>
           </Dialog>
         </header>
@@ -477,20 +509,73 @@ function AdminPage() {
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
               {profilesList.length ? (
                 profilesList.map((client) => {
-                  const clientBookings = bookings.filter((b) => b.user_id === client.id);
+                  const clientBookings = bookings
+                    .filter((b) => b.user_id === client.id)
+                    .sort(
+                      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+                    );
                   const nameText = client.full_name || "Cliente General";
+                  const isExpanded = expandedClientId === client.id;
                   return (
-                    <div
-                      key={client.id}
-                      className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-5 last:border-0"
-                    >
-                      <div>
-                        <p className="font-semibold">{nameText}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {client.phone || "Sin teléfono"}
-                        </p>
-                      </div>
-                      <Badge variant="secondary">{clientBookings.length} solicitudes</Badge>
+                    <div key={client.id} className="border-b border-border last:border-0">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedClientId(isExpanded ? null : client.id)}
+                        className="flex w-full flex-wrap items-center justify-between gap-4 p-5 text-left"
+                      >
+                        <div>
+                          <p className="font-semibold">{nameText}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {client.phone || "Sin teléfono"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge variant="secondary">{clientBookings.length} solicitudes</Badge>
+                          <span className="text-sm text-muted-foreground underline">
+                            {isExpanded ? "Ocultar historial" : "Ver historial"}
+                          </span>
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="border-t border-border bg-muted/30 px-5 py-4">
+                          {clientBookings.length ? (
+                            <ul className="space-y-3">
+                              {clientBookings.map((booking) => (
+                                <li
+                                  key={booking.id}
+                                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3"
+                                >
+                                  <div>
+                                    <p className="font-medium">{booking.properties?.name}</p>
+                                    <p className="text-sm text-muted-foreground">
+                                      {booking.check_in} → {booking.check_out} ·{" "}
+                                      {formatCurrencyDOP(Number(booking.total_amount))}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="secondary">{booking.status}</Badge>
+                                    <Badge variant={paymentStatusBadgeVariant[booking.payment_status]}>
+                                      {paymentStatusLabels[booking.payment_status] ||
+                                        booking.payment_status}
+                                    </Badge>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => setDetailBookingId(booking.id)}
+                                    >
+                                      Detalle
+                                    </Button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              Sin reservas todavía.
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })
