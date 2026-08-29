@@ -16,7 +16,6 @@ import {
 import { useState } from "react";
 import { BookingDetailDialog } from "@/components/admin/booking-detail-dialog";
 import { PropertyForm, type PropertyFormValues } from "@/components/admin/property-form";
-import { PropertyImageManager } from "@/components/admin/property-image-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,8 +60,7 @@ function AdminPage() {
   const [editingProperty, setEditingProperty] = useState<PropertyWithImages | null>(null);
   const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
-  const [draftProperty, setDraftProperty] = useState<{ id: string; name: string } | null>(null);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [section, setSection] = useState<AdminSection>("resumen");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -125,27 +123,74 @@ function AdminPage() {
   async function becomeAdmin() {
     try {
       const result = await claimAdmin();
-      setNotice(
-        result.claimed
+      setNotice({
+        text: result.claimed
           ? "Panel activado correctamente."
           : "La cuenta administradora ya fue configurada.",
-      );
+        type: result.claimed ? "success" : "error",
+      });
       await roleQuery.refetch();
     } catch {
-      setNotice("No se pudo activar el panel.");
+      setNotice({ text: "No se pudo activar el panel.", type: "error" });
     }
   }
 
-  const handleCreateProperty = async (values: PropertyFormValues) => {
+  // --- FUNCIÓN PARA SUBIR IMÁGENES ---
+  async function uploadImagesToSupabase(
+    propertyId: string,
+    propertyName: string,
+    files: File[],
+    startIndex: number,
+  ) {
+    const uploadPromises = files.map(async (file, index) => {
+      const ext = file.name.split(".").pop() || "jpg";
+      const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf("."));
+      const safeName =
+        nameWithoutExt
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9]/g, "-")
+          .replace(/-+/g, "")
+          .replace(/(^-|-$)/g, "") || "foto";
+      const uuid =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : Math.random().toString(36).substring(2, 15);
+      const path = `${propertyId}/${uuid}-${safeName}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("property-images")
+        .upload(path, file);
+      if (uploadError) throw uploadError;
+
+      return {
+        property_id: propertyId,
+        storage_path: path,
+        alt_text: `${propertyName} - foto`,
+        sort_order: startIndex + index + 1,
+      };
+    });
+
+    const imageRecords = await Promise.all(uploadPromises);
+    const { error: insertError } = await supabase.from("property_images").insert(imageRecords);
+    if (insertError) throw insertError;
+  }
+
+  // --- CREAR ALOJAMIENTO Y SUBIR FOTOS DE UNA SOLA VEZ ---
+  const handleCreateProperty = async (values: PropertyFormValues, newFiles: File[]) => {
     setIsSaving(true);
-    setNotice("");
+    setNotice(null);
     try {
-      const slug = values.name
+      // GENERACIÓN DE SLUG SEGURO: Evita el error de "duplicate key"
+      const baseSlug = values.name
         .toLowerCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const slug = `${baseSlug}-${randomSuffix}`;
+
       const { data: newProp, error: propErr } = await supabase
         .from("properties")
         .insert({ ...values, slug, status: "draft" })
@@ -153,30 +198,68 @@ function AdminPage() {
         .single();
       if (propErr) throw propErr;
 
-      setNotice("Alojamiento creado. Agrega sus fotos abajo.");
+      // Si el usuario seleccionó fotos, las subimos inmediatamente.
+      if (newFiles && newFiles.length > 0) {
+        await uploadImagesToSupabase(newProp.id, values.name, newFiles, 0);
+      }
+
+      setNotice({ text: "Alojamiento creado con éxito.", type: "success" });
+      setDialog(false);
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
-      setDraftProperty({ id: newProp.id, name: newProp.name });
     } catch (err: any) {
-      setNotice(err.message);
+      setNotice({ text: err.message || "Ocurrió un error", type: "error" });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleUpdateProperty = async (id: string, values: PropertyFormValues) => {
+  // --- ACTUALIZAR ALOJAMIENTO Y SUBIR NUEVAS FOTOS ---
+  const handleUpdateProperty = async (id: string, values: PropertyFormValues, newFiles: File[]) => {
     setIsSaving(true);
-    setNotice("");
+    setNotice(null);
     try {
-      const { error: propErr } = await supabase.from("properties").update(values).eq("id", id);
+      // En actualización mantenemos el slug simple a menos que necesites cambiarlo
+      const slug = values.name
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+
+      const { error: propErr } = await supabase
+        .from("properties")
+        .update({ ...values, slug })
+        .eq("id", id);
       if (propErr) throw propErr;
 
-      setNotice("Alojamiento actualizado.");
+      if (newFiles && newFiles.length > 0) {
+        const existingCount = editingProperty?.property_images?.length || 0;
+        await uploadImagesToSupabase(id, values.name, newFiles, existingCount);
+      }
+
+      setNotice({ text: "Alojamiento actualizado con éxito.", type: "success" });
       setEditingProperty(null);
       queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
     } catch (err: any) {
-      setNotice(err.message);
+      setNotice({ text: err.message || "Ocurrió un error", type: "error" });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeleteExistingImage = async (imageId: string, storagePath: string) => {
+    try {
+      await supabase.storage.from("property-images").remove([storagePath]);
+      await supabase.from("property_images").delete().eq("id", imageId);
+      queryClient.invalidateQueries({ queryKey: ["admin-properties"] });
+      if (editingProperty) {
+        setEditingProperty({
+          ...editingProperty,
+          property_images: editingProperty.property_images.filter((img) => img.id !== imageId),
+        });
+      }
+    } catch (err: any) {
+      setNotice({ text: "Error al borrar la foto: " + err.message, type: "error" });
     }
   };
 
@@ -291,11 +374,18 @@ function AdminPage() {
             <p className="text-sm text-muted-foreground">Panel privado</p>
             <h1 className="font-display text-4xl">Buenos días</h1>
           </div>
+          {/* DIALOG PROTEGIDO: No se cierra al hacer clic fuera y pregunta al cancelar */}
           <Dialog
             open={dialog}
             onOpenChange={(open) => {
+              if (!open) {
+                // Solo preguntamos si está intentando cerrar
+                const confirmar = window.confirm(
+                  "¿Estás seguro de que deseas cancelar? Se perderán los datos no guardados.",
+                );
+                if (!confirmar) return;
+              }
               setDialog(open);
-              if (!open) setDraftProperty(null);
             }}
           >
             <DialogTrigger asChild>
@@ -303,49 +393,38 @@ function AdminPage() {
                 <Plus /> Nuevo alojamiento
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+            <DialogContent
+              className="max-h-[85vh] max-w-2xl overflow-y-auto"
+              onPointerDownOutside={(e) => e.preventDefault()} // BLOQUEA el cierre accidental
+              onEscapeKeyDown={(e) => e.preventDefault()} // BLOQUEA el escape accidental
+            >
               <DialogHeader>
-                <DialogTitle className="font-display text-2xl">
-                  {draftProperty ? draftProperty.name : "Nuevo alojamiento"}
-                </DialogTitle>
+                <DialogTitle className="font-display text-2xl">Nuevo alojamiento</DialogTitle>
                 <DialogDescription>
-                  {draftProperty
-                    ? "Los datos se guardaron. Agrega sus fotos abajo y luego finaliza."
-                    : "Ingresa los detalles de la cabaña; podrás agregar sus fotos justo debajo, en este mismo paso."}
+                  Ingresa todos los detalles de la cabaña y selecciona sus fotos abajo en un solo
+                  lugar.
                 </DialogDescription>
               </DialogHeader>
-              {draftProperty ? (
-                <div className="space-y-6">
-                  <div className="rounded-3xl border border-border p-6 bg-muted/20">
-                    <h3 className="font-display text-xl mb-4">Fotos</h3>
-                    <PropertyImageManager
-                      propertyId={draftProperty.id}
-                      propertyName={draftProperty.name}
-                    />
-                  </div>
-                  <Button
-                    size="lg"
-                    className="w-full h-14 rounded-full text-lg shadow-lg"
-                    onClick={() => {
-                      setDialog(false);
-                      setDraftProperty(null);
-                    }}
-                  >
-                    Finalizar
-                  </Button>
-                </div>
-              ) : (
-                <PropertyForm
-                  submitLabel="Crear alojamiento"
-                  isSubmitting={isSaving}
-                  onSubmit={handleCreateProperty}
-                />
-              )}
+              <PropertyForm
+                submitLabel="Crear alojamiento"
+                isSubmitting={isSaving}
+                onSubmit={handleCreateProperty}
+              />
             </DialogContent>
           </Dialog>
         </header>
 
-        {notice && <p className="mt-5 rounded-xl bg-card p-3 text-sm print:hidden">{notice}</p>}
+        {notice && (
+          <p
+            className={`mt-5 rounded-xl p-4 text-sm font-medium print:hidden ${
+              notice.type === "success"
+                ? "bg-green-100 text-green-800 border border-green-200"
+                : "bg-red-100 text-red-800 border border-red-200"
+            }`}
+          >
+            {notice.text}
+          </p>
+        )}
 
         {section !== "finanzas" && (
           <section className="mt-8 grid gap-4 sm:grid-cols-3 print:hidden">
@@ -554,7 +633,9 @@ function AdminPage() {
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Badge variant="secondary">{booking.status}</Badge>
-                                    <Badge variant={paymentStatusBadgeVariant[booking.payment_status]}>
+                                    <Badge
+                                      variant={paymentStatusBadgeVariant[booking.payment_status]}
+                                    >
                                       {paymentStatusLabels[booking.payment_status] ||
                                         booking.payment_status}
                                     </Badge>
@@ -570,9 +651,7 @@ function AdminPage() {
                               ))}
                             </ul>
                           ) : (
-                            <p className="text-sm text-muted-foreground">
-                              Sin reservas todavía.
-                            </p>
+                            <p className="text-sm text-muted-foreground">Sin reservas todavía.</p>
                           )}
                         </div>
                       )}
@@ -763,32 +842,43 @@ function AdminPage() {
         )}
       </main>
 
+      {/* DIALOG PROTEGIDO PARA EDITAR ALOJAMIENTO */}
       <Dialog
         open={Boolean(editingProperty)}
-        onOpenChange={(open) => !open && setEditingProperty(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            const confirmar = window.confirm(
+              "¿Estás seguro de que deseas cancelar la edición? Se perderán los cambios no guardados.",
+            );
+            if (!confirmar) return;
+            setEditingProperty(null);
+          }
+        }}
       >
-        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+        <DialogContent
+          className="max-h-[85vh] max-w-2xl overflow-y-auto"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="font-display text-2xl">
               Editar {editingProperty?.name}
             </DialogTitle>
           </DialogHeader>
           {editingProperty && (
-            <div className="space-y-8">
-              <PropertyForm
-                defaultValues={editingProperty}
-                submitLabel="Guardar cambios"
-                isSubmitting={isSaving}
-                onSubmit={(values) => handleUpdateProperty(editingProperty.id, values)}
-              />
-              <div className="rounded-3xl border border-border p-6 bg-muted/20">
-                <h3 className="font-display text-xl mb-4">Fotos</h3>
-                <PropertyImageManager
-                  propertyId={editingProperty.id}
-                  propertyName={editingProperty.name}
-                />
-              </div>
-            </div>
+            <PropertyForm
+              defaultValues={editingProperty}
+              existingImages={editingProperty.property_images.map((img) => ({
+                id: img.id,
+                storage_path: img.storage_path,
+                url: supabase.storage.from("property-images").getPublicUrl(img.storage_path).data
+                  .publicUrl,
+              }))}
+              onDeleteExistingImage={handleDeleteExistingImage}
+              submitLabel="Guardar cambios"
+              isSubmitting={isSaving}
+              onSubmit={(values, files) => handleUpdateProperty(editingProperty.id, values, files)}
+            />
           )}
         </DialogContent>
       </Dialog>
